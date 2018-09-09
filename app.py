@@ -1,35 +1,39 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 app.config['DEBUG'] = True
-# socket_io = SocketIO(app)
+socketio = SocketIO(app)
 
 board = []
-is_end = False
-player = True
+winner = 0
+player_num = 0
+turn = 1
 
 
 def init_board():
+    global board
+    global winner
+    global turn
+    turn = 1
+    winner = 0
     for _ in range(20):
         board.append([0] * 19)
 
 
-def check_win(x, y, offensive):
-    if offensive:
-        color = 1
-    else:
-        color = 2
+def check_win(x, y, player):
+    global board
+    global winner
     # horizontal
     min_j = max(y-4, 0)
     max_j = min(y+5, 20)
     count = 0
     for j in range(min_j, max_j):
-        if board[x][j] == color:
+        if board[x][j] == player:
             count = count + 1
             if count == 5:
-                is_end = True
+                winner = player
                 return True
         else:
             count = 0
@@ -38,10 +42,10 @@ def check_win(x, y, offensive):
     max_i = min(x+5, 20)
     count = 0
     for i in range(min_i, max_i):
-        if board[i][y] == color:
+        if board[i][y] == player:
             count = count + 1
             if count == 5:
-                is_end = True
+                winner = player
                 return True
         else:
             count = 0
@@ -56,10 +60,10 @@ def check_win(x, y, offensive):
             continue
         if i > 19 or j > 19:
             break
-        if board[i][j] == color:
+        if board[i][j] == player:
             count = count + 1
             if count == 5:
-                is_end = True
+                winner = player
                 return True
         else:
             count = 0
@@ -73,10 +77,10 @@ def check_win(x, y, offensive):
             continue
         if i < 0 or j > 19:
             break
-        if board[i][j] == color:
+        if board[i][j] == player:
             count = count + 1
             if count == 5:
-                is_end = True
+                winner = player
                 return True
         else:
             count = 0
@@ -85,52 +89,56 @@ def check_win(x, y, offensive):
 
 @app.route('/')
 def index():
-    # print(board)
-    # return render_template("index.html", board=board)
+    init_board()
     return render_template("index.html")
 
 
-@app.route('/move')
-def move():
-    if is_end:
-        return "false"
-    i = int(request.args.get('i'))
-    j = int(request.args.get('j'))
-    offensive = request.args.get('offensive')
-    if board[i][j] == 0:
-        if offensive == "true":
-            board[i][j] = 1
-            if check_win(i, j, True):
-                return "true|1"
-        else:
-            board[i][j] = 2
-            if check_win(i, j, False):
-                return "true|2"
-        return "true|0"
+@socketio.on('connect')
+def connect():
+    global player_num
+    if player_num < 2:
+        player_num = player_num + 1
+        emit('player', player_num)
     else:
-        return "false"
-
-#
-# @socket_io.on('move')
-# def handle_move(data):
-#     # emit('move response', data, broadcast=True)
-#     print(data)
-#
-
-#
-# @socket_io.on('my event')
-# def handle_message(message):
-#     print('received message: ' + message)
+        emit('player', 'false')
 
 
-# @app.route('/dataFromAjax')
-# def dataFromAjax():
-#     test = request.args.get('mydata')
-#     print(test)
-#     return 'dataFromAjax'
+@socketio.on('restart')
+def restart():
+    global player_num
+    global board
+    init_board()
+
+
+@socketio.on('move')
+def move(data):
+    global player_num
+    global board
+    global winner
+    global turn
+    if player_num != 2:
+        return
+    if winner != 0:
+        return
+    i = data.get('i')
+    j = data.get('j')
+    current_player = data.get('player')
+    if current_player != turn:
+        return
+    if board[i][j] != 0:
+        return
+    else:
+        socketio.emit('draw', data, broadcast=True)
+        board[i][j] = current_player
+        if turn == 1:
+            turn = 2
+        else:
+            turn = 1
+        if check_win(i, j, current_player):
+            socketio.emit('win', current_player, broadcast=True)
+            return
 
 
 if __name__ == '__main__':
     init_board()
-    app.run(debug=True)
-    # socket_io.run(app)
+    socketio.run(app)
